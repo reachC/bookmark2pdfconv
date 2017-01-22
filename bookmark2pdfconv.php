@@ -1,43 +1,64 @@
 <?php
 
 /*
- * This file is part of "bookmark2pdfconv" licensed under GPLv3 (https://www.gnu.org/licenses/gpl-3.0.de.html)
+ * With this php-cli script you can save all your firefox bookmarks as pdf.
+ * Export your bookmarks to a json file and pass it as argument to the script.
+ *
+ * Example: php bookmark2pdfconv.php bookmarks.json
  *
  * Copyright (c) reachC 2017
  * https://reachcoding.eu
+ *
+ * This file is part of bookmark2pdfconv.
+ *
+ * bookmark2pdfconv is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * bookmark2pdfconv is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with bookmark2pdfconv. If not, see <http://www.gnu.org/licenses/>.
  */
 
-// show all errors
-error_reporting(0); //E_ALL);
-ini_set('display_errors', 0); // 1);
+// show no errors
+error_reporting(0);
+ini_set('display_errors', 0);
 
-// more memory and more execution time for the script
-ini_set('memory_limit','1000M');
-ini_set('max_execution_time', '800');
+// more memory and unlimited execution time for the script
+ini_set('memory_limit','600M');
+ini_set('max_execution_time', 0);
 
 // define the MPDF main folder
 define('_MPDF_URI', 'mpdf/');
 require_once _MPDF_URI. 'mpdf.php';
 
-// get json file from arguments
+// get the json file from arguments
 $file = $argv[1];
 
+// show usage lines
 if (trim($file) == "/?" || !isset($argv[1])) {
-    echo "\nbookmark2pdfconv - Save your firefox bookmarks as pdf file\n";
-    echo "licensed under GPLv3\n\n";
+    echo "\nbookmark2pdfconv - Save your firefox bookmarks into pdf files\n\n";
     echo "Usage: php bookmark2pdfconv.php [json-file]";
     echo "\n\n";
     exit();
 }
 
-// define the array where all urls are saved
+// define the array where all working urls are saved
 $urls = array();
+
+// define a array to save all failed urls
+$urlerrors = array();
 
 // number of processed pdfs
 $pdfcount = 0;
 
 // function to parse the json items
-function GetUriFromJson($jsonarray, &$urlarray) {
+function GetUriFromJson($jsonarray, &$urlarray, &$errorarray) {
     // get the child items of the json root
     $childs = $jsonarray->children;
 
@@ -50,7 +71,9 @@ function GetUriFromJson($jsonarray, &$urlarray) {
             // check if the url is valid
             if (!filter_var($url, FILTER_VALIDATE_URL) === false) {
                 $urlarray[] = $url;
-            }
+            } else {
+		$errorarray[] = $url;
+	    }
         }
     }
 }
@@ -71,20 +94,25 @@ foreach($urls as $url) {
     // create mpdf object
     $mpdf = new mPDF('utf-8', 'A3-L');
 
-    $pdfcount++; 
+    // count processed pdfs
+    $pdfcount++;
 
     // get site content
-    $html = @file_get_contents($url, NULL, NULL, 0, 100000); // change to higher value than 100000 if html file is not complete
+    $html = @file_get_contents($url, NULL, NULL, 0, 100000000); // read max. 100MB
 
-    // check if we get the content
+    // check if the response is ok
     if (!$html) {
 	echo "[" . str_pad($pdfcount, strlen($urlcount), ' ', STR_PAD_LEFT) . "/" . $urlcount . "]" . " Error (" . $http_response_header[0] . ", " . $url . ")\n";
+	$urlerrors[] = $url;
 	unset($mpdf);
 	continue;
     }
 
-    // get rid of invalid utf-8 character errors
-    $html = iconv(mb_detect_encoding($html, mb_detect_order(), true), "UTF-8", $html); //iconv("UTF-8","UTF-8//IGNORE",$html);
+    // convert website to utf-8 encoding
+    $html = iconv(mb_detect_encoding($html, mb_detect_order(), true), "UTF-8", $html);
+
+    // remove images from html because some gif images cause a out of memory error in mpdf!?!
+    $html = preg_replace("/<img[^>]+\>/i", "", $html);
 
     // set mpdf properties
     $mpdf->setBasePath($urlitem);
@@ -95,13 +123,16 @@ foreach($urls as $url) {
     $filename2 = str_replace('https', '', $filename);
     $filename3 = str_replace('http', '' , $filename2);
     $filename4 = str_replace('www', '', $filename3);
-    $filename5 = trim($filename4);
+    $filename5 = substr(trim($filename4), 0, 70);
     $filename5 .= '.pdf';
 
     // save pdf file
-    echo "[" . str_pad($pdfcount, strlen($urlcount), ' ', STR_PAD_LEFT) . "/" . $urlcount . "]" . " Write to file: " . $filename5 . "\n";
-    $mpdf->Output('temp/' . $filename5, 'F');
+    echo "[" . str_pad($pdfcount, strlen($urlcount), ' ', STR_PAD_LEFT) . "/" . $urlcount . "] " . $filename5 . "\n";
+    $mpdf->Output('output/' . $filename5, 'F');
 
     // destroy mpdf object
     unset($mpdf);
 }
+
+// show the number of failed urls
+echo "\nFailed: " . sizeof($urlerrors) . "\n";
